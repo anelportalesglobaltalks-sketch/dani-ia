@@ -1,0 +1,7 @@
+{
+  "framework": "vite",
+  "functions": {
+    "api/chat.js": { "maxDuration": 60 },
+    "api/files.js": { "maxDuration": 60 }
+  }
+}
