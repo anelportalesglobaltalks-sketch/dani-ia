@@ -1,7 +1,7 @@
 import mammoth from "mammoth";
 import { getFolderDocs } from "../lib/drive.js";
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 const SYSTEM = `Eres un asistente que responde preguntas usando como fuente principal los archivos que se te entregan (los de una carpeta de Google Drive y, si existe, el archivo que subió la persona).
