@@ -1,100 +1,90 @@
-import mammoth from "mammoth";
-import { getFolderDocs } from "../lib/drive.js";
+// api/chat.js
+import { GoogleGenerativeAI } from '@google-genai/google-genai';
+import { getAllDocumentsFromFolder } from '../lib/drive.js';
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+// Inicializar el SDK de Gemini con la API Key configurada en Vercel
+const ai = new GoogleGenerativeAI({
+  apiKey: process.env.GEMINI_API_KEY,
+});
 
-const SYSTEM = `Eres un asistente que responde preguntas usando como fuente principal los archivos que se te entregan (los de una carpeta de Google Drive y, si existe, el archivo que subió la persona).
-
-Reglas:
-- Basa tus respuestas en el contenido de los archivos y nombra de qué archivo sale cada dato.
-- Si la respuesta no está en los archivos, dilo claramente y, si puedes ayudar con conocimiento general, ofrécelo marcándolo como "fuera de los archivos".
-- Si los archivos se contradicen, muestra ambas versiones y de qué archivo viene cada una.
-- Responde en el idioma de la pregunta, de forma clara y sin relleno.`;
-
-// Convierte un archivo en "partes" que entiende Gemini
-function fileParts(d) {
-  if (d.kind === "pdf") {
-    return [
-      { text: `Archivo PDF: ${d.name}` },
-      { inlineData: { mimeType: "application/pdf", data: d.data } },
-    ];
-  }
-  return [{ text: `<archivo nombre="${d.name}">\n${d.text}\n</archivo>` }];
-}
-
-async function uploadToParts(upload) {
-  if (!upload) return [];
-  const name = `${upload.name} (subido por la persona)`;
-  if (upload.kind === "docx") {
-    const { value } = await mammoth.extractRawText({
-      buffer: Buffer.from(upload.data, "base64"),
-    });
-    return fileParts({ name, kind: "text", text: value });
-  }
-  if (upload.kind === "pdf") return fileParts({ name, kind: "pdf", data: upload.data });
-  return fileParts({ name, kind: "text", text: upload.text || "" });
+/**
+ * Función para limpiar la respuesta del modelo, eliminando
+ * sintaxis de Markdown como '***', '##', asteriscos y negritas.
+ */
+function formatPlainResponse(text) {
+  if (!text) return '';
+  return text
+    // Eliminar títulos / encabezados Markdown (##, ###, etc.)
+    .replace(/^#+\s+/gm, '')
+    // Eliminar negritas, cursivas o combinaciones con asteriscos (***, **, *)
+    .replace(/\*{1,3}/g, '')
+    // Eliminar guiones bajos de formato (__, _)
+    .replace(/_{1,2}/g, '')
+    // Reemplazar listas con guion/mas por viñetas limpias
+    .replace(/^\s*[-+]\s+/gm, '• ')
+    // Limpiar saltos de línea excesivos
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Método no permitido" });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Método no permitido. Usa POST.' });
   }
 
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("Falta la variable GEMINI_API_KEY");
+    const { question } = req.body;
 
-    const { messages, upload } = req.body || {};
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: "Falta la pregunta" });
+    if (!question || typeof question !== 'string') {
+      return res.status(400).json({ error: 'Se requiere una pregunta válida.' });
     }
 
-    const { docs } = await getFolderDocs();
-    const contextParts = docs.flatMap(fileParts);
-    const uploadParts = await uploadToParts(upload);
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+    if (!folderId) {
+      return res.status(500).json({ error: 'Falta la variable GOOGLE_DRIVE_FOLDER_ID.' });
+    }
 
-    const contents = messages.map((m, i) => {
-      const parts = [{ text: String(m.content) }];
-      if (i === 0 && m.role === "user") {
-        return { role: "user", parts: [...contextParts, ...uploadParts, ...parts] };
-      }
-      return { role: m.role === "assistant" ? "model" : "user", parts };
+    // 1. Obtener recursivamente todos los documentos contenidos dentro de las subcarpetas GT
+    const documents = await getAllDocumentsFromFolder(folderId);
+
+    // 2. Preparar el contexto reuniendo la lista e información relevante de los archivos hallados
+    const docNames = documents.map((doc) => `- ${doc.name}`).join('\n');
+    
+    const context = `
+Archivos y documentos disponibles en el sistema:
+${docNames.length > 0 ? docNames : 'No se encontraron documentos en las subcarpetas.'}
+`;
+
+    // 3. Crear el prompt e instruir a la IA a responder sin usar Markdown agresivo
+    const prompt = `
+Eres un asistente virtual de lectura de documentos para Global Talks.
+Responde de manera clara, amable, ejecutiva y profesional en texto plano sin usar sintaxis Markdown como asteriscos, guiones bajos o numerales.
+
+Contexto de documentos disponibles:
+${context}
+
+Pregunta del usuario:
+${question}
+`;
+
+    // 4. Consultar al modelo de Gemini
+    const model = 'gemini-1.5-flash';
+    const response = await ai.models.generateContent({
+      model: model,
+      contents: prompt,
     });
 
-    const response = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM }] },
-        contents,
-        generationConfig: { maxOutputTokens: 2000 },
-      }),
+    const rawAnswer = response.text || 'No se pudo generar una respuesta.';
+
+    // 5. Aplicar la limpieza para asegurar que la respuesta no lleve *** ni ##
+    const cleanAnswer = formatPlainResponse(rawAnswer);
+
+    return res.status(200).json({ answer: cleanAnswer });
+  } catch (error) {
+    console.error('Error en api/chat.js:', error);
+    return res.status(500).json({
+      error: 'Ocurrió un error al procesar la solicitud.',
+      details: error.message,
     });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      if (response.status === 429) {
-        throw new Error(
-          "Llegaste al límite gratuito de Gemini por ahora. Espera un minuto e inténtalo de nuevo."
-        );
-      }
-      throw new Error(data?.error?.message || "Error al consultar Gemini");
-    }
-
-    const answer = (data.candidates?.[0]?.content?.parts || [])
-      .map((p) => p.text || "")
-      .join("\n")
-      .trim();
-
-    if (!answer) {
-      throw new Error("Gemini no devolvió respuesta. Reformula la pregunta e inténtalo otra vez.");
-    }
-
-    res.status(200).json({ answer });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || "Error al responder" });
   }
 }
