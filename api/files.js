@@ -1,15 +1,21 @@
-import { getFolderDocs } from "../lib/drive.js";
+// api/files.js
+import { getAllDocumentsFromFolder } from '../lib/drive.js';
 
 export default async function handler(req, res) {
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Método no permitido.' });
+  }
+
   try {
-    const force = req.query?.refresh === "1";
-    const { docs, skipped } = await getFolderDocs(force);
-    res.status(200).json({
-      files: docs.map((d) => ({ id: d.id, name: d.name, kind: d.kind })),
-      skipped,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || "No se pudo leer la carpeta" });
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+    if (!folderId) {
+      return res.status(500).json({ error: 'Falta GOOGLE_DRIVE_FOLDER_ID' });
+    }
+
+    const files = await getAllDocumentsFromFolder(folderId);
+    return res.status(200).json({ files });
+  } catch (error) {
+    console.error('Error al listar archivos:', error);
+    return res.status(500).json({ error: 'Error interno al obtener archivos.' });
   }
 }

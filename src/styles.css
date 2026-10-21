@@ -7,37 +7,110 @@
   --gt-text: #212529;
   --gt-border: #e2e8f0;
   --gt-bot-bg: #f1f5f9;
+  --gt-sidebar-bg: #f1f5f9;
 }
 
 * {
   box-sizing: border-box;
 }
 
-html, body {
+html, body, #root {
   margin: 0;
   padding: 0;
-  height: 100%;
+  height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background-color: var(--gt-bg);
   color: var(--gt-text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
 }
 
-#root {
-  height: 100%;
+/* Layout Principal de 2 Columnas */
+.app-layout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
 }
 
-/* Estructura fija en pantalla */
-.app-container {
+/* --- BARRA LATERAL (SIDEBAR) --- */
+.sidebar {
+  width: 280px;
+  background-color: var(--gt-sidebar-bg);
+  border-right: 1px solid var(--gt-border);
+  display: flex;
+  flex-direction: column;
+  padding: 20px 16px;
+  flex-shrink: 0;
+}
+
+.sidebar-header h2 {
+  font-size: 1.1rem;
+  color: var(--gt-blue);
+  margin: 0 0 16px 0;
+}
+
+/* Botón Subir Archivo */
+.upload-section {
+  margin-bottom: 20px;
+}
+
+.upload-btn {
+  display: block;
+  text-align: center;
+  background-color: var(--gt-blue);
+  color: #ffffff;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.upload-btn:hover {
+  background-color: var(--gt-blue-hover);
+}
+
+/* Lista de Archivos */
+.files-tree {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.folder-title {
+  font-weight: bold;
+  font-size: 0.9rem;
+  color: var(--gt-blue);
+  margin-bottom: 8px;
+}
+
+.file-list {
+  list-style: none;
+  padding-left: 12px;
+  margin: 0;
+}
+
+.file-item {
+  font-size: 0.85rem;
+  padding: 6px 0;
+  color: #4a5568;
+  word-break: break-all;
+}
+
+.no-files {
+  font-size: 0.85rem;
+  color: #a0aec0;
+  font-style: italic;
+}
+
+/* --- PANEL PRINCIPAL (CHAT) --- */
+.main-content {
+  flex: 1;
   display: flex;
   flex-direction: column;
   height: 100vh;
-  max-width: 960px;
-  margin: 0 auto;
   background: var(--gt-card-bg);
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.05);
 }
 
-/* Encabezado */
 .app-header {
   padding: 18px 24px;
   border-bottom: 1px solid var(--gt-border);
@@ -47,12 +120,12 @@ html, body {
 
 .app-header h1 {
   margin: 0;
-  font-size: 1.3rem;
+  font-size: 1.25rem;
   color: var(--gt-blue);
   font-weight: 700;
 }
 
-/* Área de Mensajes (Solo esta área hace scroll) */
+/* Mensajes */
 .chat-history {
   flex: 1;
   overflow-y: auto;
@@ -62,7 +135,6 @@ html, body {
   gap: 16px;
 }
 
-/* Burbujas de Mensaje */
 .message {
   max-width: 75%;
   padding: 12px 18px;
@@ -87,7 +159,7 @@ html, body {
   border: 1px solid var(--gt-border);
 }
 
-/* Contenedor del Input Fijo Abajo */
+/* Input Fijo Abajo */
 .chat-input-container {
   position: sticky;
   bottom: 0;
@@ -109,7 +181,6 @@ html, body {
   border-radius: 8px;
   outline: none;
   font-size: 0.95rem;
-  transition: border-color 0.2s;
 }
 
 .chat-input-form input:focus {
@@ -124,7 +195,6 @@ html, body {
   border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s;
 }
 
 .chat-input-form button:hover {
