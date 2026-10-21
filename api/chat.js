@@ -1,28 +1,25 @@
 // api/chat.js
-import { GoogleGenerativeAI } from '@google-genai/google-genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getAllDocumentsFromFolder } from '../lib/drive.js';
 
-// Inicializar el SDK de Gemini con la API Key configurada en Vercel
-const ai = new GoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
+// Inicialización del cliente con la SDK oficial de Google Generative AI
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 /**
- * Función para limpiar la respuesta del modelo, eliminando
- * sintaxis de Markdown como '***', '##', asteriscos y negritas.
+ * Elimina sintaxis de Markdown (***, **, ##, _, etc.)
  */
 function formatPlainResponse(text) {
   if (!text) return '';
   return text
     // Eliminar títulos / encabezados Markdown (##, ###, etc.)
     .replace(/^#+\s+/gm, '')
-    // Eliminar negritas, cursivas o combinaciones con asteriscos (***, **, *)
+    // Eliminar asteriscos de negrita, cursiva o listas (***, **, *)
     .replace(/\*{1,3}/g, '')
     // Eliminar guiones bajos de formato (__, _)
     .replace(/_{1,2}/g, '')
-    // Reemplazar listas con guion/mas por viñetas limpias
+    // Convertir listas con guion a viñetas limpias
     .replace(/^\s*[-+]\s+/gm, '• ')
-    // Limpiar saltos de línea excesivos
+    // Limpiar saltos de línea múltiples
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -41,50 +38,54 @@ export default async function handler(req, res) {
 
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
     if (!folderId) {
-      return res.status(500).json({ error: 'Falta la variable GOOGLE_DRIVE_FOLDER_ID.' });
+      return res.status(500).json({ error: 'Falta la variable GOOGLE_DRIVE_FOLDER_ID en el entorno.' });
     }
 
-    // 1. Obtener recursivamente todos los documentos contenidos dentro de las subcarpetas GT
-    const documents = await getAllDocumentsFromFolder(folderId);
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: 'Falta la variable GEMINI_API_KEY en el entorno.' });
+    }
 
-    // 2. Preparar el contexto reuniendo la lista e información relevante de los archivos hallados
+    // 1. Obtener la lista de documentos de las subcarpetas GT (GTPI, PYC, Diseño, Redes, Redacción)
+    let documents = [];
+    try {
+      documents = await getAllDocumentsFromFolder(folderId);
+    } catch (driveErr) {
+      console.error('Error al leer carpetas de Google Drive:', driveErr);
+    }
+
+    // 2. Formatear el contexto de los documentos
     const docNames = documents.map((doc) => `- ${doc.name}`).join('\n');
-    
-    const context = `
-Archivos y documentos disponibles en el sistema:
-${docNames.length > 0 ? docNames : 'No se encontraron documentos en las subcarpetas.'}
-`;
+    const context = docNames.length > 0 
+      ? docNames 
+      : 'No se encontraron documentos en las subcarpetas de Google Drive.';
 
-    // 3. Crear el prompt e instruir a la IA a responder sin usar Markdown agresivo
+    // 3. Crear Prompt indicando respuesta sin sintaxis Markdown
     const prompt = `
 Eres un asistente virtual de lectura de documentos para Global Talks.
-Responde de manera clara, amable, ejecutiva y profesional en texto plano sin usar sintaxis Markdown como asteriscos, guiones bajos o numerales.
+Responde de manera clara, amable y profesional en texto plano sin usar sintaxis de formato Markdown como asteriscos (***), guiones bajos (_) o numerales (##).
 
-Contexto de documentos disponibles:
+Estructura de documentos accesibles:
 ${context}
 
 Pregunta del usuario:
 ${question}
 `;
 
-    // 4. Consultar al modelo de Gemini
-    const model = 'gemini-1.5-flash';
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: prompt,
-    });
+    // 4. Invocar el modelo Gemini
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
 
-    const rawAnswer = response.text || 'No se pudo generar una respuesta.';
-
-    // 5. Aplicar la limpieza para asegurar que la respuesta no lleve *** ni ##
-    const cleanAnswer = formatPlainResponse(rawAnswer);
+    // 5. Aplicar formateador sin Markdown
+    const cleanAnswer = formatPlainResponse(responseText);
 
     return res.status(200).json({ answer: cleanAnswer });
+
   } catch (error) {
-    console.error('Error en api/chat.js:', error);
-    return res.status(500).json({
-      error: 'Ocurrió un error al procesar la solicitud.',
-      details: error.message,
+    console.error('Error en API chat:', error);
+    return res.status(500).json({ 
+      error: 'Error interno del servidor', 
+      details: error.message 
     });
   }
 }
