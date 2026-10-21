@@ -1,11 +1,10 @@
 /**
- * GT Buscador — busca en Notion + Drive, LEE el contenido de los
+ * GT Buscador — busca en Drive, LEE el contenido de los
  * documentos (Google Docs / Sheets) y responde con Gemini.
  *
- * Variables de entorno: NOTION_TOKEN, GDRIVE_SA_KEY, GEMINI_API_KEY,
+ * Variables de entorno: GDRIVE_SA_KEY, GEMINI_API_KEY,
  * GDRIVE_ROOT_FOLDER_ID
  */
-import { Client as NotionClient } from "@notionhq/client";
 import { google } from "googleapis";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
@@ -42,28 +41,6 @@ function crearDrive(saKeyJson) {
     scopes: ["https://www.googleapis.com/auth/drive.readonly"],
   });
   return google.drive({ version: "v3", auth });
-}
-
-/* ---------- Notion ---------- */
-
-async function searchNotion(token, query) {
-  if (!token) return [];
-  try {
-    const notion = new NotionClient({ auth: token });
-    const res = await notion.search({ query, page_size: 8 });
-    return res.results.map((r) => ({
-      source: "notion",
-      title:
-        r.properties?.title?.title?.[0]?.plain_text ||
-        r.properties?.Name?.title?.[0]?.plain_text ||
-        r.child_page?.title ||
-        "(sin título)",
-      url: r.url,
-    }));
-  } catch (err) {
-    console.error("Error buscando en Notion:", err.message);
-    return [];
-  }
 }
 
 /* ---------- Drive: búsqueda ---------- */
@@ -262,7 +239,7 @@ async function interpretarConGemini(apiKey, pregunta, resultados, contenidos, fu
 Eres el buscador interno de "Global Talks" (GT), grupo extraacadémico de la UPC.
 Pregunta del integrante: "${pregunta}"
 
-Resultados encontrados:
+Resultados encontrados en Google Drive:
 ${listado || "(ninguno)"}
 
 Contenido leído de los documentos:
@@ -281,7 +258,7 @@ Responde SOLO con un objeto JSON válido (sin texto extra, sin bloques de códig
 Reglas:
 - "respuesta": solo si la pregunta pide un dato concreto (quién, cuánto, cuándo, pasos, responsable) que se pueda contestar con el contenido leído. Máximo 3 frases, basadas ÚNICAMENTE en ese contenido. Si la persona solo busca un documento, déjala como "".
 - No resumas los documentos. No inventes datos, documentos ni links.
-- Si una fuente (Notion o Drive) no tuvo resultados, no la menciones.
+- Todo viene de Google Drive; no menciones Notion.
 - "items": solo documentos realmente relevantes, máximo 5.
 - Texto plano: sin asteriscos, sin negritas, sin viñetas, sin markdown.
 `.trim();
@@ -327,12 +304,8 @@ export default async function handler(req, res) {
       console.error("GDRIVE_SA_KEY inválida:", err.message);
     }
 
-    const [notionResults, driveResultado] = await Promise.all([
-      searchNotion(process.env.NOTION_TOKEN, query),
-      searchDrive(drive, query, folderId),
-    ]);
-
-    const resultados = [...notionResults, ...driveResultado.resultados];
+    const driveResultado = await searchDrive(drive, query, folderId);
+    const resultados = driveResultado.resultados;
     const contenidos = await leerContenido(drive, driveResultado.resultados);
 
     let respuesta;
