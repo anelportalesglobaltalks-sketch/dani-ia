@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   try {
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
     if (!folderId) {
-      return res.status(500).json({ error: 'Falta GOOGLE_DRIVE_FOLDER_ID' });
+      return res.status(500).json({ error: 'Falta configurar GOOGLE_DRIVE_FOLDER_ID' });
     }
 
     const files = await getAllDocumentsFromFolder(folderId);
