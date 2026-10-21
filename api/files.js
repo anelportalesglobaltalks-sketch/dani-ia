@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     const files = await getAllDocumentsFromFolder(folderId);
     return res.status(200).json({ files });
   } catch (error) {
-    console.error('Error al listar archivos:', error);
-    return res.status(500).json({ error: 'Error interno al obtener archivos.' });
+    console.error('Error en /api/files:', error);
+    return res.status(500).json({ files: [], error: error.message });
   }
 }
