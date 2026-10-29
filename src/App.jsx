@@ -1,152 +1,257 @@
-// src/App.jsx
-import React, { useState, useEffect } from 'react';
-import './styles.css';
+import { useEffect, useRef, useState } from "react";
+
+const MAX_UPLOAD = 3 * 1024 * 1024; // límite práctico en Vercel (~4.5 MB de petición)
+const SUGGESTIONS = [
+  "¿Qué archivos tengo disponibles y de qué trata cada uno?",
+  "Hazme un resumen de los puntos más importantes",
+  "¿Qué fechas o plazos aparecen en los documentos?",
+];
+
+function readUpload(file) {
+  return new Promise((resolve, reject) => {
+    const name = file.name;
+    const ext = name.split(".").pop().toLowerCase();
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
+
+    if (file.size > MAX_UPLOAD) {
+      return reject(new Error("El archivo pesa más de 3 MB. Sube uno más liviano."));
+    }
+    if (["txt", "md", "csv", "json"].includes(ext)) {
+      reader.onload = () => resolve({ name, kind: "text", text: reader.result });
+      reader.readAsText(file);
+    } else if (["pdf", "docx"].includes(ext)) {
+      reader.onload = () =>
+        resolve({ name, kind: ext, data: String(reader.result).split(",")[1] });
+      reader.readAsDataURL(file);
+    } else {
+      reject(new Error("Formato no admitido. Usa PDF, DOCX, TXT, MD, CSV o JSON."));
+    }
+  });
+}
 
 export default function App() {
-  const [query, setQuery] = useState('');
-  const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [files, setFiles] = useState([]);
+  const [driveFiles, setDriveFiles] = useState([]);
+  const [skipped, setSkipped] = useState([]);
+  const [driveState, setDriveState] = useState("loading"); // loading | ready | error
+  const [driveError, setDriveError] = useState("");
 
-  // Cargar lista de archivos al iniciar la app
+  const [upload, setUpload] = useState(null);
+  const [uploadError, setUploadError] = useState("");
+  const [dragging, setDragging] = useState(false);
+
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [chatError, setChatError] = useState("");
+
+  const fileInput = useRef(null);
+  const endRef = useRef(null);
+
+  async function loadFiles(refresh = false) {
+    setDriveState("loading");
+    try {
+      const res = await fetch(`/api/files${refresh ? "?refresh=1" : ""}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "No se pudo leer la carpeta.");
+      setDriveFiles(data.files);
+      setSkipped(data.skipped || []);
+      setDriveState("ready");
+    } catch (err) {
+      setDriveError(err.message);
+      setDriveState("error");
+    }
+  }
+
   useEffect(() => {
-    fetchFiles();
+    loadFiles();
   }, []);
 
-  const fetchFiles = async () => {
-    try {
-      const res = await fetch('/api/files');
-      if (res.ok) {
-        const data = await res.json();
-        setFiles(data.files || []);
-      }
-    } catch (err) {
-      console.error('Error cargando archivos:', err);
-    }
-  };
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, sending]);
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
+  async function handleFile(file) {
     if (!file) return;
-
-    setUploading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-
+    setUploadError("");
     try {
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (res.ok) {
-        alert('Archivo subido correctamente');
-        fetchFiles(); // Recargar la lista de documentos
-      } else {
-        alert('Error al subir el archivo');
-      }
+      setUpload(await readUpload(file));
     } catch (err) {
-      console.error(err);
-      alert('Error al procesar la subida');
-    } finally {
-      setUploading(false);
+      setUploadError(err.message);
     }
-  };
+  }
 
-  const handleSend = async (e) => {
-    e.preventDefault();
-    if (!query.trim()) return;
+  async function send(text) {
+    const question = text.trim();
+    if (!question || sending) return;
 
-    const userText = query;
-    setMessages((prev) => [...prev, { role: 'user', text: userText }]);
-    setQuery('');
-    setLoading(true);
+    const next = [...messages, { role: "user", content: question }];
+    setMessages(next);
+    setInput("");
+    setChatError("");
+    setSending(true);
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: userText }),
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: next, upload }),
       });
       const data = await res.json();
-      setMessages((prev) => [...prev, { role: 'bot', text: data.answer }]);
+      if (!res.ok) throw new Error(data.error || "No se pudo obtener respuesta.");
+      setMessages([...next, { role: "assistant", content: data.answer }]);
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'bot', text: 'Error al procesar la consulta.' },
-      ]);
+      setChatError(err.message);
     } finally {
-      setLoading(false);
+      setSending(false);
     }
-  };
+  }
+
+  function onKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send(input);
+    }
+  }
 
   return (
-    <div className="app-layout">
-      {/* Barra Lateral Izquierda */}
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <h2>Documentos GT</h2>
-        </div>
+    <div className="app">
+      <aside className="rail">
+        <h1 className="brand">Pregúntale a tus archivos</h1>
 
-        {/* Botón de subir archivo */}
-        <div className="upload-section">
-          <label className="upload-btn">
-            {uploading ? 'Subiendo...' : '+ Subir Archivo'}
-            <input 
-              type="file" 
-              onChange={handleFileUpload} 
-              disabled={uploading} 
-              style={{ display: 'none' }} 
-            />
-          </label>
-        </div>
+        <section className="block">
+          <div className="block-head">
+            <h2>Carpeta de Drive</h2>
+            <button
+              className="link"
+              onClick={() => loadFiles(true)}
+              disabled={driveState === "loading"}
+            >
+              Actualizar
+            </button>
+          </div>
 
-        {/* Lista de Carpetas y Documentos */}
-        <div className="files-tree">
-          <div className="folder-title">📁 GT</div>
-          <ul className="file-list">
-            {files.length > 0 ? (
-              files.map((file) => (
-                <li key={file.id} className="file-item">
-                  📄 {file.name}
+          {driveState === "loading" && <p className="muted">Leyendo la carpeta…</p>}
+          {driveState === "error" && <p className="error">{driveError}</p>}
+          {driveState === "ready" && driveFiles.length === 0 && (
+            <p className="muted">
+              La carpeta no tiene archivos legibles. Comparte la carpeta con la cuenta
+              de servicio y agrega documentos.
+            </p>
+          )}
+          {driveState === "ready" && driveFiles.length > 0 && (
+            <ul className="files">
+              {driveFiles.map((f) => (
+                <li key={f.id} title={f.name}>
+                  <span className={`dot ${f.kind}`} />
+                  <span className="name">{f.name}</span>
                 </li>
-              ))
-            ) : (
-              <li className="no-files">Cargando carpetas...</li>
-            )}
-          </ul>
-        </div>
+              ))}
+            </ul>
+          )}
+          {skipped.length > 0 && (
+            <details className="skipped">
+              <summary>{skipped.length} sin leer</summary>
+              <ul>
+                {skipped.map((s) => (
+                  <li key={s.name}>
+                    {s.name}: {s.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </section>
+
+        <section className="block">
+          <h2>Tu archivo</h2>
+          {upload ? (
+            <div className="uploaded">
+              <span className="name" title={upload.name}>
+                {upload.name}
+              </span>
+              <button className="link" onClick={() => setUpload(null)}>
+                Quitar
+              </button>
+            </div>
+          ) : (
+            <div
+              className={`drop ${dragging ? "over" : ""}`}
+              onClick={() => fileInput.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragging(false);
+                handleFile(e.dataTransfer.files[0]);
+              }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === "Enter" && fileInput.current?.click()}
+            >
+              <strong>Sube un archivo</strong>
+              <span>PDF, DOCX, TXT, MD, CSV o JSON · hasta 3 MB</span>
+            </div>
+          )}
+          <input
+            ref={fileInput}
+            type="file"
+            hidden
+            accept=".pdf,.docx,.txt,.md,.csv,.json"
+            onChange={(e) => {
+              handleFile(e.target.files[0]);
+              e.target.value = "";
+            }}
+          />
+          {uploadError && <p className="error">{uploadError}</p>}
+        </section>
       </aside>
 
-      {/* Contenido Principal (Chat) */}
-      <main className="main-content">
-        <header className="app-header">
-          <h1>Global Talks - Asistente de Documentos</h1>
-        </header>
+      <main className="chat">
+        <div className="thread">
+          {messages.length === 0 && (
+            <div className="empty">
+              <h2>¿Qué quieres saber de tus documentos?</h2>
+              <p>
+                Respondo con lo que dicen los archivos de la carpeta y el que subas, y
+                te digo de cuál sale cada dato.
+              </p>
+              <div className="chips">
+                {SUGGESTIONS.map((s) => (
+                  <button key={s} onClick={() => send(s)}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-        <div className="chat-history">
-          {messages.map((m, idx) => (
-            <div key={idx} className={`message ${m.role}`}>
-              {m.text}
+          {messages.map((m, i) => (
+            <div key={i} className={`msg ${m.role}`}>
+              {m.content}
             </div>
           ))}
-          {loading && <div className="message bot">Procesando y consultando documentos...</div>}
+
+          {sending && <div className="msg assistant pending">Leyendo los archivos…</div>}
+          {chatError && <div className="msg error-msg">{chatError}</div>}
+          <div ref={endRef} />
         </div>
 
-        <footer className="chat-input-container">
-          <form onSubmit={handleSend} className="chat-input-form">
-            <input
-              type="text"
-              placeholder="Escribe tu consulta sobre los documentos GT..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <button type="submit" disabled={loading}>
-              Enviar
-            </button>
-          </form>
-        </footer>
+        <div className="composer">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Escribe tu pregunta"
+            rows={1}
+          />
+          <button onClick={() => send(input)} disabled={sending || !input.trim()}>
+            Preguntar
+          </button>
+        </div>
       </main>
     </div>
   );
