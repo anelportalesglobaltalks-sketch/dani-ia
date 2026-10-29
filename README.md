@@ -24,8 +24,9 @@ Entra a [aistudio.google.com](https://aistudio.google.com) → **Get API key** �
 2. En [vercel.com](https://vercel.com) → Add New → Project → importa el repositorio.
 3. En **Environment Variables** agrega:
    - `GEMINI_API_KEY`
-   - `DRIVE_FOLDER_ID`
-   - `GOOGLE_SERVICE_ACCOUNT_JSON` → pega el contenido completo del JSON descargado
+   - `GOOGLE_DRIVE_FOLDER_ID`
+   - `GOOGLE_SERVICE_ACCOUNT_EMAIL` → el `client_email` del JSON
+   - `GOOGLE_PRIVATE_KEY` → el `private_key` del JSON
    - `GEMINI_MODEL` (opcional, por defecto `gemini-2.5-flash`)
 4. Deploy.
 
