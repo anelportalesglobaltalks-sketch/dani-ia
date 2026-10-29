@@ -41,6 +41,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Método no permitido" });
   }
 
+  const t0 = Date.now();
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error("Falta la variable GEMINI_API_KEY");
@@ -51,6 +52,7 @@ export default async function handler(req, res) {
     }
 
     const { docs } = await getFolderDocs();
+    const tDrive = Date.now() - t0;
     const contextParts = docs.flatMap(fileParts);
     const uploadParts = await uploadToParts(upload);
 
@@ -62,17 +64,25 @@ export default async function handler(req, res) {
       return { role: m.role === "assistant" ? "model" : "user", parts };
     });
 
+    // Límite propio: corta antes que Vercel (60 s) para poder mostrar un mensaje claro
+    const remaining = Math.max(58_000 - (Date.now() - t0), 5_000);
+    console.log(
+      `[chat] modelo=${MODEL} archivos=${docs.length} drive=${tDrive}ms pdfs=${docs.filter((d) => d.kind === "pdf").length}`
+    );
+
     const response = await fetch(ENDPOINT, {
       method: "POST",
+      signal: AbortSignal.timeout(remaining),
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: SYSTEM }] },
         contents,
-        generationConfig: { maxOutputTokens: 2000 },
+        generationConfig: { maxOutputTokens: 4000 },
       }),
     });
 
     const data = await response.json();
+    console.log(`[chat] gemini respondió en ${Date.now() - t0}ms (status ${response.status})`);
 
     if (!response.ok) {
       if (response.status === 429) {
@@ -94,7 +104,13 @@ export default async function handler(req, res) {
 
     res.status(200).json({ answer });
   } catch (err) {
-    console.error(err);
+    console.error(`[chat] error tras ${Date.now() - t0}ms:`, err);
+    if (err?.name === "TimeoutError" || err?.name === "AbortError") {
+      return res.status(504).json({
+        error:
+          "Gemini tardó demasiado en responder. Inténtalo de nuevo; si se repite, el archivo es muy pesado o el modelo está saturado.",
+      });
+    }
     res.status(500).json({ error: err.message || "Error al responder" });
   }
 }

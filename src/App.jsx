@@ -97,8 +97,22 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: next, upload }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "No se pudo obtener respuesta.");
+      const text = await res.text();
+      let data = null;
+      try {
+        data = JSON.parse(text);
+      } catch {}
+      if (!res.ok || !data) {
+        if (data?.error) throw new Error(data.error);
+        if (res.status === 504 || res.status === 408) {
+          throw new Error(
+            "La respuesta tardó demasiado y el servidor la cortó. Inténtalo de nuevo (la segunda vez suele ser más rápida) o sube un archivo más pequeño."
+          );
+        }
+        throw new Error(
+          `El servidor falló (código ${res.status}). Revisa los logs en Vercel para ver el detalle.`
+        );
+      }
       setMessages([...next, { role: "assistant", content: data.answer }]);
     } catch (err) {
       setChatError(err.message);
